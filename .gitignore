@@ -45,6 +45,7 @@ ipch
 */*.xcodeproj/xcuserdata
 
 .vscode/*
+*/.vscode/*
 
 *.zip
 
