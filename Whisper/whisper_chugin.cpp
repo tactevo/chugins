@@ -28,7 +28,7 @@ static CBufferSimple* ck_event_queue = NULL;
 struct WhisperChugin {
     char* model_path_MALLOC;
 
-    float input[(int) (WHISPER_SAMPLE_RATE * 5)]; 
+    float input[(int) (WHISPER_SAMPLE_RATE * 4)]; 
     float input_size;
     int input_pos;  // write idx
 
@@ -40,6 +40,7 @@ struct WhisperChugin {
     bool doing_inference; // set by inference thread
     char* last_inference_text_MALLOC; // set by inference thread
     int last_inference_text_size;
+    bool did_last_trancribe_flush; // true if call to transcribe() 
 
     // synchronization
     mtx_t accum_mutex;   
@@ -53,8 +54,10 @@ struct WhisperChugin {
 
     Chuck_Event* transcribe_event; // broadcast when transcription finishes
 
-    // for now we have fixed step=500ms, len=5000ms, keep=200ms
+    // for now we have fixed window_size=5000ms, keep=200ms
+    // @TODO make these sizes configurable via chugin params
     float keep_sec = .2f;
+
 };
 
 CK_DLL_CTOR( whisper_ctor );
@@ -62,9 +65,28 @@ CK_DLL_DTOR( whisper_dtor );
 CK_DLL_MFUN( whisper_get_text );
 
 CK_DLL_MFUN( whisper_transcribe );
+CK_DLL_MFUN( whisper_was_context_reset );
+
+CK_DLL_SFUN( whisper_set_log_level );
+CK_DLL_SFUN( whisper_get_log_level );
 
 CK_DLL_TICK( whisper_tick );
 t_CKINT whisper_data_offset = 0;
+
+
+static ggml_log_level whisper_chugin_log_level = GGML_LOG_LEVEL_NONE;
+static void whisper_chugin_log_callback(ggml_log_level level, const char * text, void * user_data) {
+    if (level < whisper_chugin_log_level) return;
+
+    (void) user_data;
+#ifndef WHISPER_DEBUG
+    if (level == GGML_LOG_LEVEL_DEBUG) {
+        return;
+    }
+#endif
+    fputs(text, stderr);
+    fflush(stderr);
+}
 
 
 CK_DLL_INFO( Whisper )
@@ -78,14 +100,13 @@ CK_DLL_INFO( Whisper )
 
 CK_DLL_QUERY( Whisper )
 {
-    // nocheckin
-    whisper_context_params cparams = whisper_context_default_params(); 
-    printf("use_gpu: %d\n", cparams.use_gpu);
-
     ck_vm = QUERY->ck_vm(QUERY);
     ck_api = (QUERY->ck_api(QUERY));
     ck_srate = ck_api->vm->srate(ck_vm);
     ck_event_queue = ck_api->vm->create_event_buffer(ck_vm);
+
+    // set global log callback
+    whisper_log_set(whisper_chugin_log_callback, NULL);
 
     QUERY->setname( QUERY, "Whisper" );
 
@@ -93,6 +114,20 @@ CK_DLL_QUERY( Whisper )
 
     static t_CKINT whisper_srate = WHISPER_SAMPLE_RATE;
     QUERY->add_svar( QUERY, "int", "SRATE", true, &whisper_srate );
+
+
+    static t_CKINT log_level_none =  GGML_LOG_LEVEL_NONE ;
+    QUERY->add_svar( QUERY, "int", "LOG_LEVEL_NONE", true, &log_level_none );
+    static t_CKINT log_level_debug = GGML_LOG_LEVEL_DEBUG;
+    QUERY->add_svar( QUERY, "int", "LOG_LEVEL_DEBUG", true, &log_level_debug );
+    static t_CKINT log_level_info =  GGML_LOG_LEVEL_INFO ;
+    QUERY->add_svar( QUERY, "int", "LOG_LEVEL_INFO", true, &log_level_info );
+    static t_CKINT log_level_warn =  GGML_LOG_LEVEL_WARN ;
+    QUERY->add_svar( QUERY, "int", "LOG_LEVEL_WARN", true, &log_level_warn );
+    static t_CKINT log_level_error = GGML_LOG_LEVEL_ERROR;
+    QUERY->add_svar( QUERY, "int", "LOG_LEVEL_ERROR", true, &log_level_error );
+    static t_CKINT log_level_cont =  GGML_LOG_LEVEL_CONT ;
+    QUERY->add_svar( QUERY, "int", "LOG_LEVEL_CONT", true, &log_level_cont );
 
     QUERY->add_ctor( QUERY, whisper_ctor );
     QUERY->add_arg(QUERY, "string", "path_to_model");
@@ -107,8 +142,23 @@ CK_DLL_QUERY( Whisper )
     // and declare a tickf function using CK_DLL_TICKF
 
     QUERY->add_mfun(QUERY, whisper_transcribe, "Event", "transcribe");
+    QUERY->add_mfun(QUERY, whisper_was_context_reset, "int", "wasContextReset");
+    QUERY->doc_func(QUERY, 
+        "Returns true if the laset call to transcribe() trigger a flush of the internal inference buffer, i.e. clearing the accumulated context. "
+        "By default the inference buffer is 5sec long, meaning this is true once every 5seconds of calls to transcribe(). "
+        "In effect, if true transcription text is reset, and the next call .text() will start again from an empty string"
+    );
 
     QUERY->add_mfun( QUERY, whisper_get_text, "string", "text" );
+
+
+    QUERY->add_sfun(QUERY, whisper_set_log_level, "void", "log");
+    QUERY->add_arg(QUERY, "int", "level");
+    QUERY->doc_func(QUERY, "Sets log level. Higher is less verbose. Set to 0 to get everything");
+
+    QUERY->add_sfun(QUERY, whisper_get_log_level, "int", "log");
+    QUERY->doc_func(QUERY, "Gets current log level");
+
     
     // this reserves a variable in the ChucK internal class to store 
     // referene to the c++ class we defined above
@@ -326,6 +376,7 @@ CK_DLL_MFUN( whisper_transcribe )
         memset(w->accum + overlap_window_samps, 0, (accum_cap - overlap_window_samps) * sizeof(float));
         w->accum_size = overlap_window_samps;
     }
+    w->did_last_trancribe_flush = would_overflow;
 
     // copy over the contents from input buffer
     ASSERT(accum_cap - w->accum_size >= w->input_size);
@@ -334,7 +385,7 @@ CK_DLL_MFUN( whisper_transcribe )
         input_read_pos += input_cap;
         // need to wrap
         int size1 = input_cap - input_read_pos;
-        int size2 = w->input_size - size1; ASSERT(size2 > 0);
+        int size2 = w->input_size - size1; ASSERT(size2 >= 0);
         memcpy(w->accum + w->accum_size, w->input + input_read_pos, sizeof(float) * size1 );
         w->accum_size += size1;
         memcpy(w->accum + w->accum_size, w->input, sizeof(float) * size2);
@@ -355,6 +406,12 @@ CK_DLL_MFUN( whisper_transcribe )
     cnd_broadcast(&w->transcribe_cond);
 }
 
+CK_DLL_MFUN( whisper_was_context_reset )
+{
+    WhisperChugin * w = (WhisperChugin *)OBJ_MEMBER_INT(SELF, whisper_data_offset);
+    RETURN->v_int = w->did_last_trancribe_flush ? 1 : 0;
+}
+
 
 // example implementation for getter
 CK_DLL_MFUN(whisper_get_text)
@@ -364,4 +421,15 @@ CK_DLL_MFUN(whisper_get_text)
     mtx_lock(&w->accum_mutex);
     RETURN->v_object = (Chuck_Object*) API->object->create_string(VM, w->last_inference_text_MALLOC ? w->last_inference_text_MALLOC : "", false);
     mtx_unlock(&w->accum_mutex);
+}
+
+
+CK_DLL_SFUN( whisper_set_log_level )
+{
+    whisper_chugin_log_level = (ggml_log_level) GET_NEXT_INT(ARGS);
+}
+
+CK_DLL_SFUN( whisper_get_log_level )
+{
+    RETURN->v_int = (t_CKINT) whisper_chugin_log_level;
 }
