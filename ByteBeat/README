@@ -1,0 +1,76 @@
+Guides
+- http://canonical.org/~kragen/bytebeat/
+- https://nightmachines.tv/downloads/Bytebeats_Beginners_Guide_TTNM_v1-5.pdf
+- https://lovebyte.party/bytebeat_rpn_guide.pdf
+- https://stellartux.github.io/websynth/guide.html
+
+Theory
+- https://en.wikipedia.org/wiki/Low-complexity_art
+- https://countercomplex.blogspot.com/
+    - the guy who started it all, viznut
+        - https://countercomplex.blogspot.com/2014/09/choosing-low-tech-visual-styles-for.html
+            - https://www.youtube.com/watch?v=1qWBjSfmadU sick visuals
+            - https://www.youtube.com/watch?v=lb6erJZiUgc how??
+            - https://www.youtube.com/watch?v=0R48MOXS7Wg
+    - http://viznut.fi/texts-en/resource_leak_bug_of_our_civilization.html
+        - articulates many of my own feelings about state of modern software, and suggests why I too might
+        be drawn towards the retro/demo aesthetic of computing
+- http://viznut.fi/texts-en/bytebeat_exploring_space.pdf
+    - viznuts academic paper
+    
+
+
+
+
+
+Players
+- https://damikyu.itch.io/evaluator
+    - cool because it has watch windows and knobs
+        - would want to make something similar in chugl (adding knobs and debug watchers for any variable) 
+        - gives ability to perform a bytebeat live 
+
+Greggman HTML5 bytebeat player: https://github.com/greggman/html5bytebeat?tab=readme-ov-file
+- also links with: https://www.vertexshaderart.com/
+    - TODO investigate later for audiovisual stuff
+
+
+
+Frequency of t is srate / bit_depth. So at 8khz srate with 8bit unsigned audio samples, 
+just outputting sample count t will create a saw wave with frequency 8000/256 = 31.25hz which is approx a C1
+
+Modulo %
+Does 2 things: change pitch AND attenuate volume
+E.g. `t % 128` doubles freq and halves volume
+t % m, where m < 256 (or whatever the MAX_INT is) causes the output to cycle every m samples
+Using formula freq = srate/bit_depth, we can determine frequency m = srate/freq and JI ratios.
+E.g. we know a major 3rd has a ratio of 5:4 or 1.25:1. Then 256 / 1.25 = 204.8 ~= 205, so
+`t % 205` will produce a freq that is a major 3rd higher than just `t`
+This works for any expression, e.g. `(t*4) % 205` will be a major3 above `(t*4)`
+
+
+( t * 9& t >>4|t * 5 & t>>7 | t*3 & t>>10) // pretty
+
+((t>>12 & 1) * 2 - 1) // impulse or kick
+(t>>5 & 0x80) // impulse or kick
+idea: the falling or rising edge of a square wave produces an impulse
+
+Mixing
+(3*t % 256) / 2   + (2*t % 256) / 2
+idea: need to modulo 256 and then divide by the # of sounds being mixed together so 
+there isn't any aliasing from wrap-around
+
+cool beat
+(t*4 % 256) / ((t%1000) / 250)
+The important part is the divisor, e.g.
+```
+(
+(t*4 % 256)                            // base freq
+/ 
+2 * ((t%6000) / ((t>>4 ) % (900 + 0))) // divisor
+)
+```
+
+
+
+
+
