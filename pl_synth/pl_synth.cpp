@@ -128,12 +128,12 @@ static pl_synth_rt_song_t* parseJson(const char* json_str) {
         ck_api->vm->em_log(1, "pl_synth: Error parsing JSON");
     } else {
         // print all tokens
-        for (int json_elem_idx = 0; json_elem_idx < num_tokens; json_elem_idx++)
-        {
-            jsmntok_t tok = tokens[json_elem_idx];
-            // print tok
-            printf("type %d, start %d, end %d, size %d\n", tok.type, tok.start, tok.end, tok.size);
-        }
+        // for (int json_elem_idx = 0; json_elem_idx < num_tokens; json_elem_idx++)
+        // {
+        //     jsmntok_t tok = tokens[json_elem_idx];
+        //     // print tok
+        //     printf("type %d, start %d, end %d, size %d\n", tok.type, tok.start, tok.end, tok.size);
+        // }
 
         song = (pl_synth_rt_song_t*) calloc(1, sizeof(*song));
 
@@ -187,9 +187,15 @@ static pl_synth_rt_song_t* parseJson(const char* json_str) {
                         case 14: s->env_sustain = val; break;
                         case 15: s->env_release = val; break;
                         case 16: s->env_master = val; break;
-                        case 17: s->fx_filter = val; break;
+                        case 17: {
+                            s->fx_filter = val; 
+                            // printf("parsed filter %d\n", val);
+                        }break;
                         case 18: s->fx_freq = val; break;
-                        case 19: s->fx_resonance = val; break;
+                        case 19: {
+                            s->fx_resonance = val; 
+                            // printf("filter res %d\n", val);
+                        }break;
                         case 20: s->fx_delay_time = val; break;
                         case 21: s->fx_delay_amt = val; break;
                         case 22: s->fx_pan_freq = val; break;
@@ -278,8 +284,8 @@ CK_DLL_TICKF( pl_synth_tick_multichannel ) {
         // output[0] = pl_synth_clamp_s16(output[0]);
         // output[1] = pl_synth_clamp_s16(output[1]);
 
-        // out[0] = output[0] / 32768.0f;
-        // out[1] = output[1] / 32768.0f;
+        out[0] = output[0] / 32768.0f;
+        out[1] = output[1] / 32768.0f;
         // printf("%d ", output[0]);
     }
 

@@ -176,6 +176,7 @@ typedef struct {
 
 typedef struct {
 	uint32_t row_len;
+	uint64_t samps; // incr on every tick
 	uint8_t num_tracks;
 	pl_synth_rt_track_t *tracks;
 } pl_synth_rt_song_t;
@@ -558,16 +559,16 @@ void pl_synth_track_tick(pl_synth_rt_track_t *track, int16_t *samples, int row_l
 	}
 
 	// clamp
-	left = pl_synth_clamp_s16(left);
-	right = pl_synth_clamp_s16(right);
+	// left = pl_synth_clamp_s16(left);
+	// right = pl_synth_clamp_s16(right);
 
 	// write to delay line
 	track->delay_line_MALLOC[2*track->delay_line_write_idx + 0] = left;
 	track->delay_line_MALLOC[2*track->delay_line_write_idx + 1] = right;
 
 	// write to output
-	samples[0] += left;
-	samples[1] += right;
+	samples[0] = pl_synth_clamp_s16(left + samples[0]);
+	samples[1] = pl_synth_clamp_s16(right + samples[1]);
 	
 	// wrap write head
 	if (++track->delay_line_write_idx >= track->delay_line_size) {
