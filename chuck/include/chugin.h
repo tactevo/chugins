@@ -116,7 +116,7 @@
 // 1.5.0.0 (ge) | moved to chuck.h for at-a-glance visibility
 // 1.5.2.0 (ge) | moved to chuck_def.h for chugins headers streamlining
 //-----------------------------------------------------------------------------
-#define CHUCK_VERSION_STRING        "1.5.5.0 (chai)"
+#define CHUCK_VERSION_STRING        "1.5.5.8-dev (chai)"
 //-----------------------------------------------------------------------------
 
 
@@ -2254,6 +2254,8 @@ public:
         ShredApi();
         // get shred parent
         Chuck_VM_Shred * (CK_DLL_CALL * const parent)( Chuck_VM_Shred * shred );
+        // (NEW) get shred parent
+        // Chuck_VM_Shred * (CK_DLL_CALL * const set_immediate_mode)( Chuck_VM_Shred * shred, t_CKBOOL value );
     } * const shred;
 
     // constructor
